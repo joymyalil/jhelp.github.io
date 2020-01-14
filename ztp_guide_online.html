@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="generator" content="Asciidoctor 2.0.10">
+<link rel="icon" type="image/png" href="./images/icons/rtb.png">
+<title>Zero-Touch Provisioning (ZTP) Guide</title>
+<link rel="stylesheet" href="./css/olh.css">
+</head>
+<body class="book toc2 toc-left">
+<div id="header">
+<h1>Zero-Touch Provisioning (ZTP) Guide</h1>
+<div class="details">
+<span id="revnumber">version 2019.1.0,</span>
+<span id="revdate">25 November 2019</span>
+</div>
+<div id="toc" class="toc2">
+<div id="toctitle">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#_introduction_to_ztp">1. Introduction to ZTP</a></li>
+<li><a href="#_ztp_in_a_nutshell">2. ZTP in a Nutshell</a>
+<ul class="sectlevel2">
+<li><a href="#_the_ztp_process">2.1. The ZTP Process</a></li>
+</ul>
+</li>
+<li><a href="#_the_ztp_management_server">3. The ZTP Management Server</a>
+<ul class="sectlevel2">
+<li><a href="#_management_server_architecture">3.1. Management Server Architecture</a></li>
+<li><a href="#_dhcp_service_for_ztp">3.2. DHCP Service for ZTP</a></li>
+<li><a href="#_http_service_for_ztp">3.3. HTTP Service for ZTP</a></li>
+</ul>
+</li>
+<li><a href="#_the_ztp_daemon_ztpd">4. The ZTP Daemon (ZTPD)</a>
+<ul class="sectlevel2">
+<li><a href="#running_ztpd">4.1. Running ZTPD</a></li>
+<li><a href="#ztpd-ctrld_rbfs_inter_process_communication">4.2. ZTPD-CTRLD-RBFS Inter-Process Communication</a>
+<ul class="sectlevel3">
+<li><a href="#_startup_configuration">4.2.1. Startup Configuration</a></li>
+<li><a href="#_cmd_configuration">4.2.2. Cmd Configuration</a></li>
+<li><a href="#_element_configuration">4.2.3. Element Configuration</a></li>
+<li><a href="#_ctrld_configuration">4.2.4. CTRLD Configuration</a></li>
+</ul>
+</li>
+<li><a href="#log_files">4.3. Log Files</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<div id="content">
+<div id="preamble">
+<div class="sectionbody">
+<div style="page-break-after: always;"></div>
+<!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css"> //
+<a href="ztp_guide_v2019.1.0_25nov2019.pdf" download="ztp_guide_v2019.1.0_25nov2019.pdf"><button class="btn"><i class="fa fa-download"></i> Download</button></a> -->
+<a href="ztp_guide_v2019.1.0_25nov2019.pdf" download="ztp_guide_v2019.1.0_25nov2019.pdf"><img src="./images/icons/download.png" alt="Download PDF" style="margin:0px 0px"></img></a>
+<!-- toc disabled -->
+</div>
+</div>
+<div class="sect1">
+<h2 id="_introduction_to_ztp">1. Introduction to ZTP</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>A major goal in any network is a high level of automation. This includes the automatic provisioning of switches newly installed in the network, a process known as <em>Zero-Touch Provisioning (ZTP)</em>.</p>
+</div>
+<div class="paragraph">
+<p>A new switch comes preinstalled with the Open Network Installation Environment (ONIE). The ONIE is an open source <em>installation environment</em> that acts as an enhanced boot loader utilizing facilities in a Linux/BusyBox environment. This small Linux operating system allows end-users and channel partners to install the target network OS as part of provisioning.</p>
+</div>
+<div class="paragraph">
+<p>Because ONIE needs the ability to obtain configuration and image binaries through the management interface, a management LAN is required.</p>
+</div>
+<div class="paragraph">
+<p>ONIE has access only to the management interface. ONIE starts a DHCP-based discovery process to obtain basic configuration information, such as the management IP address and the URL of the image to install on the switch. ONIE pulls the image and boots it, all without manual intervention.</p>
+</div>
+<div class="paragraph">
+<p>However, even after the ONIE boots the image, the switch is not yet configured. For configuration, the RtBrick images come with some preinstalled daemons. One, the preinstalled Control Daemon (CtrlD), is responsible for the management of the switch, and another preinstalled daemon, the ZTP Daemon (ZTPD), is the daemon which takes over after the image is activated. The ZTP daemon is responsible for configuring the switch properly.</p>
+</div>
+<div class="paragraph">
+<p>To do this, hardware box needs to connect to a DHCP server and a management server through the management LAN. The management server is responsible for providing the image binaries and the configuration of each device.</p>
+</div>
+<div class="paragraph">
+<p>In summary, there are three basic steps to ZTP operation:</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>Discover the IP address through DHCP.</p>
+</li>
+<li>
+<p>Get the image with HTTP.</p>
+</li>
+<li>
+<p>Activate the image configuration and boot it, also with HTTP.</p>
+</li>
+</ol>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_ztp_in_a_nutshell">2. ZTP in a Nutshell</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>This document provides a brief overview of Zero-Touch Provisioning (ZTP) and discusses the managed ZTP process as a ZTP application in the RtBrick Management System (RBMS). The focus is on the REST APIs of the RBMS ZTP application itself, and the management server hosting the actual ZTP service.</p>
+</div>
+<div class="paragraph">
+<p>Some of these sections discuss how to provision the management server. By the end of this document, we show how ONIE fetches the images.</p>
+</div>
+<div class="sect2">
+<h3 id="_the_ztp_process">2.1. The ZTP Process</h3>
+<div class="paragraph">
+<p>ZTP is a DHCP-based process driven by ONIE. ONIE is preinstalled on a white box switch. Figure 1 shows the overall ZTP process.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/ztp_process.png" alt="The Overall ZTP Process">
+</div>
+<div class="title">Figure 1. The Overall ZTP Process</div>
+</div>
+<div class="paragraph">
+<p>The management server runs a DHCP service and a local image repository accessible through HTTP. The complete ZTP process takes place in three distinct steps.</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>ONIE uses DHCP to discover the IP address along with basic device configuration.</p>
+</li>
+<li>
+<p>ONIE determines the image download URL based on the provided DHCP options. For download, ONIE allows different ways to pull an image from the repository. In this ZTP process, HTTP is used to pull the image because ONIE conveys the serial number as the HTTP header. This serial number allows the image repository to identify the switch and select the appropriate image</p>
+</li>
+<li>
+<p>The final step is to activate the image and the RBFS container. The container in turn fetches the application configuration from the image repository.</p>
+</li>
+</ol>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_the_ztp_management_server">3. The ZTP Management Server</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>The management server is responsible for bootstrapping a hardware device, such as a white-box switch.</p>
+</div>
+<div class="sect2">
+<h3 id="_management_server_architecture">3.1. Management Server Architecture</h3>
+<div class="paragraph">
+<p>Two services are provided by the management server, as required by ONIE:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>The DHCP service assigns an IP address to the switch.</p>
+</li>
+<li>
+<p>The HTTP service delivers the NOS image and startup configuration.</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>This architecture leverages standard software to implement both services, and to configure them to satisfy the ONIE requirements. Figure 2 illustrates the management server components as well as the interactions with RBFS, RBMS, and image repository.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/ztp_mgmt_server_architecture.png" alt="The ZTP Management Server Architecture">
+</div>
+<div class="title">Figure 2. The ZTP Management Server Architecture</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_dhcp_service_for_ztp">3.2. DHCP Service for ZTP</h3>
+<div class="paragraph">
+<p>Because of its low set of requirements, the default DHCP server shipped with ubuntu, isc-dhcp,  is used to run the DHCP service.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_http_service_for_ztp">3.3. HTTP Service for ZTP</h3>
+<div class="paragraph">
+<p>The HTTP service is implemented as a <em>transparent proxy</em>. The proxy tries to pull images and configuration from the image repository and the RBMS respectively. If the image repository or RBMS are not reachable, then the proxy uses a local fallback.</p>
+</div>
+<div class="paragraph">
+<p>The HTTP service is implemented using <em>nginx</em>, an open-source HTTP Server. The nginx is configured to read the <strong>ONIE_SERIAL_NUMBER HTTP</strong> header and maps the serial number to the NOS installer image download path. The mapping configuration is generated by the management server provisioning scripts.</p>
+</div>
+<div class="paragraph">
+<p>Nginx supports modularized configuration. This means that the mapping configuration can be generated and isolated from the general nginx configuration, but included when needed. This helps configuration management because only the mapping configuration needs to be generated.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_the_ztp_daemon_ztpd">4. The ZTP Daemon (ZTPD)</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>The ZTPD is a <em>post-ZTP daemon</em>, which means that it runs after the image is activated. This daemon is responsible for configuring the switch properly.</p>
+</div>
+<div class="sect2">
+<h3 id="running_ztpd">4.1. Running ZTPD</h3>
+<div class="paragraph">
+<p>In a production environment, the ztpd binary starts with default parameters. The service is called <code>rtbrick-ztpd</code>. Key parameters for ZTPD are shown below.</p>
+</div>
+<div class="literalblock">
+<div class="content">
+<pre>$ ztpd -h
+Usage of ztpd:
+  -addr string
+    	HTTP network address (default "localhost:19092")
+  -dhcp
+    	Runs dhcp logic
+  -onl string
+    	onl base folder (default "/lib/platform-config/current/onl")
+  -serial
+    	Runs serial logic
+  -syslog string
+    	syslog file (default "/var/log/syslog")
+  -run
+      Runs the whole ztp logic
+  -e string
+      Element Name only needed if run is active
+  -c string
+      Container Name, only needed if run is active
+  -version
+    	Returns the software version</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>To get the installed version, use the <code>ztpd -version</code> command.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="ztpd-ctrld_rbfs_inter_process_communication">4.2. ZTPD-CTRLD-RBFS Inter-Process Communication</h3>
+<div class="paragraph">
+<p>Figure 3 shows the inter-process communication between ZTPD and the service that ZTPD relies on., CTRLD and RBFS.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/ztp_inter_process_communication.png" alt="ZTPD Inter-Process Communication with CTRLD and RBFS">
+</div>
+<div class="title">Figure 3. ZTPD Inter-Process Communication with CTRLD and RBFS</div>
+</div>
+<div class="paragraph">
+<p>ZTPD subscribes to CTRLD for the event “ContainerOperationalStateChangedToUp.” This means that ZTPD is informed when an RtBrick container has an operational state of up.</p>
+</div>
+<div class="paragraph">
+<p>When the container is up, ZTPD tries to configure the container.</p>
+</div>
+<div class="paragraph">
+<p>The management server stores the configurations and provides the IP address of the DHCP server. Because all configurations are bound to the serial number, the device serial number is also needed to get the right configuration for the box.</p>
+</div>
+<div class="paragraph">
+<p>The configurations are downloaded from the management server and the configuring is performed by CtrlD.</p>
+</div>
+<div class="paragraph">
+<p>It is important to note that the subscription from ZTP to CtrlD is periodic. That is, communication takes place every 60 seconds. This repetition is needed because the subscription is stateless, meaning CtrlD stores the subscription information only in memory. After a restart of CtrlD this information is gone, and a new subscription must be done.</p>
+</div>
+<div class="paragraph">
+<p>This is a well-known pattern in the microservices domain, and helps promote better resilience of the ecosystem.</p>
+</div>
+<div class="paragraph">
+<p>The following configurations are stored at the management server:</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>Startup Configuration</p>
+</li>
+<li>
+<p>Cmd Configuration</p>
+</li>
+<li>
+<p>Element Configuration</p>
+</li>
+<li>
+<p>CTRLD Configuration</p>
+</li>
+</ol>
+</div>
+<div class="sect3">
+<h4 id="_startup_configuration">4.2.1. Startup Configuration</h4>
+<div class="paragraph">
+<p>The startup configuration is the running-configuration of the RBFS switch.</p>
+</div>
+<div class="paragraph">
+<p>This configuration must be reachable at <code>&lt;dhcpip&gt;/ztp/config/startup</code></p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_cmd_configuration">4.2.2. Cmd Configuration</h4>
+<div class="paragraph">
+<p>ZTPD can load a text or plain file from the <code>&lt;dhcpip&gt;/ztp/config/ctrld</code> location.</p>
+</div>
+<div class="paragraph">
+<p>This file contains commands that are executed in the RBFS bash.</p>
+</div>
+<div class="paragraph">
+<p>Here is an example file:</p>
+</div>
+<div class="literalblock">
+<div class="content">
+<pre>ls -la | grep var
+rtb confd show running-configuration</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Each line is executed against the RBFS.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_element_configuration">4.2.3. Element Configuration</h4>
+<div class="paragraph">
+<p>The element config must be reachable at &lt;dhcpip&gt;/ztp/config/element.</p>
+</div>
+<div class="paragraph">
+<p>This configuration sets the element name and the PoD name in the container. The element name is used to identify the container to the RBMS.</p>
+</div>
+<div class="paragraph">
+<p>Here is an example file:</p>
+</div>
+<div class="literalblock">
+<div class="content">
+<pre>{
+    "element_name": "element_name",
+    "pod_name": "pod2"
+}</pre>
+</div>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_ctrld_configuration">4.2.4. CTRLD Configuration</h4>
+<div class="paragraph">
+<p>Th e CtrlD must be reachable at <code>&lt;dhcpip&gt;/ztp/config/ctrld</code>.</p>
+</div>
+<div class="paragraph">
+<p>A detailed description of this configuration can be found in the CtrlD documentation.</p>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="log_files">4.3. Log Files</h3>
+<div class="paragraph">
+<p>The relevant log files can be found here:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><code>/var/log/rtbrick-ztpd.log</code></p>
+</li>
+</ul>
+</div>
+<hr>
+<div class="paragraph">
+<p>&#169;Copyright 2019 RtBrick, Inc. All rights reserved. The information contained herein is subject
+to change without notice. The trademarks, logos and service marks ("Marks") displayed in this
+documentation are the property of RtBrick in the United States and other countries. Use of the Marks
+are subject to RtBrick’s Term of Use Policy, available at <a href="https://www.rtbrick.com/privacy" class="bare">https://www.rtbrick.com/privacy</a>. Use of marks
+belonging to other parties is for informational purposes only.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="footer">
+<div id="footer-text">
+Version 2019.1.0<br>
+Last updated 2020-01-07 17:56:36 +0530
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="generator" content="Asciidoctor 2.0.10">
+<link rel="icon" type="image/png" href="./images/icons/rtb.png">
+<title>TCP-AO Configuration Guide</title>
+<link rel="stylesheet" href="./css/olh.css">
+</head>
+<body class="book toc2 toc-left">
+<div id="header">
+<h1>TCP-AO Configuration Guide</h1>
+<div class="details">
+<span id="revnumber">version 2019.1.0,</span>
+<span id="revdate">25 November 2019</span>
+</div>
+<div id="toc" class="toc2">
+<div id="toctitle">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#_introduction_to_tcp_ao">1. Introduction to TCP-AO</a></li>
+<li><a href="#_implementation_of_tcp_ao">2. Implementation of TCP-AO</a>
+<ul class="sectlevel2">
+<li><a href="#_tcp_ao_parameters">2.1. TCP-AO Parameters</a></li>
+<li><a href="#_tcp_ao_key_rollover">2.2. TCP-AO Key Rollover</a></li>
+</ul>
+</li>
+<li><a href="#_tcp_ao_configuration_example">3. TCP-AO Configuration Example</a>
+<ul class="sectlevel2">
+<li><a href="#_tcp_ao_topology">3.1. TCP-AO Topology</a></li>
+<li><a href="#_tcp_ao_configuration">3.2. TCP-AO Configuration</a></li>
+</ul>
+</li>
+<li><a href="#_tcp_ao_example_test_case">4. TCP-AO Example Test Case</a>
+<ul class="sectlevel2">
+<li><a href="#_baseline_bgp_sessions_without_authentication">4.1. Baseline BGP Sessions Without Authentication</a></li>
+<li><a href="#_configure_tcp_ao_authentication">4.2. Configure TCP-AO Authentication</a></li>
+<li><a href="#_verify_tcp_ao_configuration">4.3. Verify TCP-AO Configuration</a></li>
+<li><a href="#_verify_authenticated_bgp_session_status">4.4. Verify Authenticated BGP Session Status</a></li>
+<li><a href="#_verify_authenticated_tcp_status">4.5. Verify Authenticated TCP Status</a></li>
+</ul>
+</li>
+<li><a href="#_stressing_the_tcp_ao_example">5. Stressing the TCP-AO Example</a>
+<ul class="sectlevel2">
+<li><a href="#_force_use_of_receive_key2">5.1. Force Use of Receive Key2</a></li>
+<li><a href="#_force_key_mismatch">5.2. Force Key Mismatch</a></li>
+<li><a href="#_change_authentication_type">5.3. Change Authentication Type</a></li>
+</ul>
+</li>
+<li><a href="#_deleting_tcp_ao">6. Deleting TCP-AO</a></li>
+<li><a href="#_troubleshooting_tcp_ao">7. Troubleshooting TCP-AO</a></li>
+</ul>
+</div>
+</div>
+<div id="content">
+<div id="preamble">
+<div class="sectionbody">
+<div style="page-break-after: always;"></div>
+<!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css"> //
+<a href="ztp_guide_v2019.1.0_25nov2019.pdf" download="ztp_guide_v2019.1.0_25nov2019.pdf"><button class="btn"><i class="fa fa-download"></i> Download</button></a> -->
+
+<a href="tcp_ao_guide.pdf" download="tcp_ao_guide.pdf"><img src="./images/icons/download.png" alt="Download PDF" style="margin:0px 0px"></img></a>
+<!-- toc disabled -->
+</div>
+</div>
+<div class="sect1">
+<h2 id="_introduction_to_tcp_ao">1. Introduction to TCP-AO</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>BGP, which connects routers with a TCP session, does not benefit directly from packet-level authentication. Authentication in BGP is a critical concern because BGP carries routing information all over the global public internet, creating a tempting target for route-status hackers, and, at the same time, making the authenticity of inter- and intra-AS routing information absolutely essential.</p>
+</div>
+<div class="paragraph">
+<p>An initial attempt at TCP authentication in RFC 2385 added an MD5 signature to the TCP segment header. The TCP option Kind field value of 19 (decimal) indicated the presence of the MD5 signature in the TCP segment header. It did not take long before the restrictive nature of the length and type of the protection became apparent. Simply put, this method quickly became outdated.</p>
+</div>
+<div class="paragraph">
+<p>RFC 5925 replaced the older method with a more flexible and improved authentication technique, using TCP header option Kind 29 (decimal) to indicate use of the TCP authentication option (TCP-AO).</p>
+</div>
+<div class="paragraph">
+<p>According to RFC 5925, TCP-AO added:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Stronger Message Authentication Codes (MACs)</p>
+</li>
+<li>
+<p>Better protection against replays for the long-lived TCP sessions common between routers</p>
+</li>
+<li>
+<p>A framework for the relationship between TCP authentication and security in general</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>The scope of the newer TCP-OA is indicated in the length of the RFCs: the 6 pages of RFC 2385 became 48 pages in RFC 5925. TCP-AO is compatible with the use of a Master Key Tuple (MKT),  either static or with an out-of-band management technique. Both methods protect connections using the same MKT in repeated connection instances, as well as coordinating MKT changes  between endpoints.</p>
+</div>
+<div class="paragraph">
+<p>TCP-AO is compatible with the use of TCP MD5, but only with Kind = 29. However, if both Kind = 19 and Kind = 29 options appear in the same TCP header, or the header contains multiple Kind = 29 options, then the segment must be silently discarded.</p>
+</div>
+<div class="paragraph">
+<p>The implications of TCP-AO use are considerable, such as the effects on TCP header size. For more information, see RFC 5925.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_implementation_of_tcp_ao">2. Implementation of TCP-AO</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>The RtBrick Full Stack (RBFS) supports three different MACs as described in RFC 5925:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>MD5 (RFC 2385 compatible)</p>
+</li>
+<li>
+<p>HMAC-SHA-1-96</p>
+</li>
+<li>
+<p>HMAC-SHA-256-128</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Sections in this chapter include:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>TCP-AO Parameters</p>
+</li>
+<li>
+<p>TCP-AO Key Rollover</p>
+</li>
+</ul>
+</div>
+<div class="sect2">
+<h3 id="_tcp_ao_parameters">2.1. TCP-AO Parameters</h3>
+<div class="paragraph">
+<p>TCP-AO for RBFS uses a set of parameters. The parameters are all mandatory and configured under an authentication_identifier that provides a convenient way to package the TCP-AO options.</p>
+</div>
+<div class="paragraph">
+<p>The individual parameters gathered under an authentication_identifier are:</p>
+</div>
+<div class="paragraph">
+<p>local_ipv4_prefix&#8212;&#8203;A valid IPv4 prefix from which the connection is created.<br>
+local_ipv6_prefix—A valid IPv6 prefix from which the connection is created.<br>
+remote_ipv4_prefix—A valid IPv4 prefix to connect to.<br>
+remote_ipv6_prefix—A valid IPv6 prefix to connect to.<br>
+local_port—The local port that the connection uses.<br>
+remote_port—The remote port that the connection uses.<br>
+authentication_type—The authentication method used, either MD5, HMAC-SHA-1-96, or HMAC-SHA-256-128.<br>
+send_key—The secret key used by the sending side of the connection.<br>
+send_key_id—An identifier for the send key.<br>
+receive_key1—The primary key value expected from the other side of the connection.<br>
+receive_key1_id—An identifier for the primary expected key value.<br>
+receive_key2—The secondary key value expected from the other side of the connection.<br>
+receive_key2_id—An identifier for the secondary expected key value.</p>
+</div>
+<div class="paragraph">
+<p>As noted above, all parameters are mandatory. Wild card support is provided by configuring a particular authentication_identifier on port 0. This configuration applies the same configuration to all ports in the system. The parameters are applied as local or remote depending on connection initiation.</p>
+</div>
+<div class="paragraph">
+<p>The IPv4 and IPv6 prefix parameters provide an opportunity to control the range of prefixes onto which authentication is applied.</p>
+</div>
+<div class="paragraph">
+<p>The key identifiers are used as defined in RFC 5925, although not supported in MD5. MD5 support is maintained for consistency, but the key identifiers are ignored if the authentication type is MD5. This allows the user to easily change the authentication type from MD5 to others on the fly, as needed.</p>
+</div>
+<div class="paragraph">
+<p>The secret key string is stored in an AES encrypted format within the system. When entering this field, the user must prepend the plain text format with a 0 so that the system understands the input is in plain text. The string 0rtbrick is an example of this usage. In this case, the actual password is rtbrick and the prepended 0 indicates the plain text style is used.</p>
+</div>
+<div class="paragraph">
+<p>The password string is stored in the system as 11e4946e31b406de98b3077aef03ed5a7302930293293923209302932930293029 after encryption. This can be used as an input secret string for the remote system as well.</p>
+</div>
+<div class="paragraph">
+<p>The command <strong>show tcp authentication summary instance</strong> &lt;instance name&gt; displays the encrypted information for the given instance.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_tcp_ao_key_rollover">2.2. TCP-AO Key Rollover</h3>
+<div class="paragraph">
+<p>Normally, a rollover to a new key value disrupts the TCP session. For seamless key rollover, two receive keys and identifiers need to be configured.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/receive_side_auth.png" alt="TCP-AO Receive Side Authentication">
+</div>
+<div class="title">Figure 1. TCP-AO Receive Side Authentication</div>
+</div>
+<div class="paragraph">
+<p>Figure 1 shows how an incoming TCP message is processed at the receiver. First, the message digest from the TCP packet needs to be located and extracted. Then, the message digest is computed and validated against the first receive key.</p>
+</div>
+<div class="paragraph">
+<p>If this initial step results in an <em>Auth-FAIL1</em> event, then the message digest based on the second receive key is computed and validated. If there is another failure (an <em>Auth-FAIL2</em> event), then the TCP-message is discarded and the TCP-failed-Auth counter is incremented.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_tcp_ao_configuration_example">3. TCP-AO Configuration Example</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>This section of the document details the configuration and use of the TCP-AO feature for the RBFS.</p>
+</div>
+<div class="paragraph">
+<p>Sections in this chapter include:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>TCP-AO Topology</p>
+</li>
+<li>
+<p>TCP-AO Configuration</p>
+</li>
+</ul>
+</div>
+<div class="sect2">
+<h3 id="_tcp_ao_topology">3.1. TCP-AO Topology</h3>
+<div class="paragraph">
+<p>The leaf/spine topology used in this example is shown in Figure 2.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/tcp_ao_example_topology.png" alt="The TCP-AO Example Topology">
+</div>
+<div class="title">Figure 2. The TCP-AO Example Topology</div>
+</div>
+<div class="paragraph">
+<p>In this topology:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Leaf-1 and Leaf-2 are routers sitting close to the servers. These routers can be the equivalent of ToR (Top of Rack) boxes in the case of data center implementation, or Provider Edge (PE) routers in a typical ISP environment.</p>
+</li>
+<li>
+<p>Spine-1 and Spine-2 are the routers serving as route-reflectors, which distribute the routes across the leaf routers. They are connected to Core-1 and Core-2 routers (not included in this TCP-AO example). A BGP session runs between the Spine and Core routers.</p>
+</li>
+<li>
+<p>Customer Edge (CE-1 and CE-2) or related aggregation devices are routers that connect to the leaf devices. Typically, a BGP VRF session runs between a Leaf and CE device.</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Only the leaf and spine devices are used for this example. All the configurations and outputs are shown for the same devices. All leaf and spine system are running the RBFS software.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_tcp_ao_configuration">3.2. TCP-AO Configuration</h3>
+<div class="paragraph">
+<p>The code box below shows the example configuration to configure TCP session authentication for a BGP setup.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<img src="./images/icons/note.png" alt="Note">
+</td>
+<td class="content">
+CLI commands are not available for non-default instances. Bug <a href="https://bugs.rtbrick.com/bugzilla/show_bug.cgi?id=1918">1918</a> tracks this issue.
+</td>
+</tr>
+</table>
+</div>
+<div class="literalblock">
+<div class="content">
+<pre>{
+    "objects": [
+        {
+            "attribute": {
+                "authentication_identifier": "client",
+                "receive_key2_id": 2,
+                "receive_key2": "0rtbrick2", "receive_key1_id": 1,
+                "local_ipv4_prefix": "192.168.10.1/16",
+                "remote_ipv4_prefix": "192.168.10.2/16",
+                "local_port": 0,
+                "remote_port": 179,
+                "authentication_type": "MD5",
+                "send_key": "0rtbrick",
+                "send_key_id": 1,
+                "receive_key1": "11e4946e31b406de98b3077aef03ed5a7"
+                }
+          },
+            {
+             "attribute": {
+                   "authentication_identifier": "server",
+                   "receive_key2_id": 2,
+                   "receive_key2": "0rtbrick2",
+                   "receive_key1_id": 1,
+                   "local_ipv4_prefix": "192.168.10.1/16",
+                   "remote_ipv4_prefix": "192.168.10.2/16",
+                   "local_port": 179,
+                   "remote_port": 0,
+                   "authentication_type": "MD5",
+                   "send_key": "0rtbrick",
+                   "send_key_id": 1,
+                   "receive_key1": "11e4946e31b406de98b3077aef03ed5a7"
+                   },
+                    }
+                   ],
+                   "table": {
+                       "table_name": "vrf_6.tcp.auth.config"
+             }
+    }</pre>
+</div>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<img src="./images/icons/note.png" alt="Note">
+</td>
+<td class="content">
+The code box above shows two JSON objects embedded in a single configuration file, one for the server and one for the client. The server BGP session uses local port number 179 and the remote destination port can be any valid number, including 0. The port numbers for the client are the opposite: the local port is any valid number, including 0, and the remote port is 179. Both are required to match in this way for the session to activate.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>Configurations can use the authentication types HMAC-SHA-1-96 or HMAC-SHA-256-128 as well.</p>
+</div>
+<div class="paragraph">
+<p>The table name here is <code>vrf_6.tcp.auth.config</code>, indicating that this configuration applies to vrf_6.</p>
+</div>
+<div class="paragraph">
+<p>In general, the table format to push the configuration to <code>&lt;instance_name&gt;.tcp.auth.config</code>. Please be sure to format the table name accordingly, because other forms are not supported.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_tcp_ao_example_test_case">4. TCP-AO Example Test Case</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>This section of the document shows how to bring up the authenticated BGP sessions and make sure that they are working properly.</p>
+</div>
+<div class="paragraph">
+<p>Sections in this chapter include:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Baseline BGP Session Without Authentication</p>
+</li>
+<li>
+<p>Configure TCP-AO Authentication</p>
+</li>
+<li>
+<p>Verify TCP-AO Configuration</p>
+</li>
+<li>
+<p>Verify Authenticated BGP Session Status</p>
+</li>
+<li>
+<p>Verify Authenticated TCP Connection Status</p>
+</li>
+</ul>
+</div>
+<div class="sect2">
+<h3 id="_baseline_bgp_sessions_without_authentication">4.1. Baseline BGP Sessions Without Authentication</h3>
+<div class="paragraph">
+<p>Initially, the example topology has established BGP sessions, but without authentication. The command <code>show bgp peer</code> shows the status of the BGP sessions (in this case, between a leaf and the spine routers).</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/show_bgp_peer.png" alt="show bgp peer">
+</div>
+</div>
+<div class="paragraph">
+<p>For more information on configuring BGP on the RBFS software, see the <em>BGP Configuration Guide</em>.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_configure_tcp_ao_authentication">4.2. Configure TCP-AO Authentication</h3>
+<div class="paragraph">
+<p>The TCP-AO configuration for all device under test (DUT) boxes is shown below.</p>
+</div>
+<div class="literalblock">
+<div class="content">
+<pre>DUT: All boxes
+    Source IPv6 Address: fe80::/16
+    Remote IPv6 Address: fe80::/16
+    Source port : 0
+    Destination Port : 179
+    Configuration parameters.
+        Authentication Type : MD5
+        Send Key : 0rtbrick
+        Receive Key1 : 11e4946e31b406de98b3077aef03ed5a7302930293293923209302932930293029
+        Receive Key2 : 0rtbrick_alternate
+
+    Source IPv6 Address: fe80::/16
+    Remote IPv6 Address: fe80::/16
+    Soucre port : 179
+    Destination Port : 0
+    Configuration parameters.
+        Authentication Type : MD5
+        Send Key : 0rtbrick
+        Receive Key1 : 11e4946e31b406de98b3077aef03ed5a7302930293293923209302932930293029
+        Receive Key2 : 0rtbrick_alternate</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_verify_tcp_ao_configuration">4.3. Verify TCP-AO Configuration</h3>
+<div class="paragraph">
+<p>The TCP-AO configuration is displayed with the show tcp authentication summary command.</p>
+</div>
+<div class="paragraph">
+<p>Here is the result for leaf1:</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/show_tcp_auth_summary_leaf1.png" alt="show tcp auth summary leaf1">
+</div>
+</div>
+<div class="paragraph">
+<p>Here is the result for spine1:</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/show_tcp_auth_summary_spine1.png" alt="show tcp auth summary spine1">
+</div>
+</div>
+<div class="paragraph">
+<p>Verify that all parameters are correct.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_verify_authenticated_bgp_session_status">4.4. Verify Authenticated BGP Session Status</h3>
+<div class="paragraph">
+<p>After TCP-AO configuration and application, the BGP sessions should still be up and established. BGP session status is displayed with the <code>show bgp peer</code> command.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/show_bgp_peer_verify.png" alt="show bgp peer verify">
+</div>
+</div>
+<div class="paragraph">
+<p>The same status should be displayed for the other leaf and spine devices.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_verify_authenticated_tcp_status">4.5. Verify Authenticated TCP Status</h3>
+<div class="paragraph">
+<p>After TCP-AO configuration and application, the TCP connections should display authentication flags and options. TCP connection and session status is displayed with the <code>show tcp status detail</code> command.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/show_tcp_status_detail.png" alt="show tcp status detail">
+</div>
+</div>
+<div class="paragraph">
+<p>The same status should be displayed for the other leaf and spine devices.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_stressing_the_tcp_ao_example">5. Stressing the TCP-AO Example</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>This section of the document shows how configuration changes can force TCP-AO to take certain actions.</p>
+</div>
+<div class="paragraph">
+<p>Sections in this chapter include:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Force Use of Receive Key2</p>
+</li>
+<li>
+<p>Force Key Mismatch</p>
+</li>
+<li>
+<p>Change Authentication Type</p>
+</li>
+</ul>
+</div>
+<div class="sect2">
+<h3 id="_force_use_of_receive_key2">5.1. Force Use of Receive Key2</h3>
+<div class="paragraph">
+<p>Up to this point, the example topology has established BGP sessions using TCP-AO. The command show bgp peer shows the status of the BGP sessions. If the configuration send key changes, but still matches the second receive key, the connection re-establishes itself, and does not flap.</p>
+</div>
+<div class="paragraph">
+<p>To demonstrate this, change the configuration on Spine1 to use 0rtbrick_alternate as the send key. This change is shown in bold.</p>
+</div>
+<div class="literalblock">
+<div class="content">
+<pre>DUT: Spine1
+    Source IPv6 Address: fe80::/16
+    Remote IPv6 Address: fe80::/16
+    Source port : 0
+    Destination Port : 179
+    Configuration parameters.
+        Authentication Type : MD5
+        Send Key : 0rtbrick_alternate
+        Receive Key1 : 11e4946e31b406de98b3077aef03ed5a7302930293293923209302932930293029
+        Receive Key2 : 0rtbrick_alternate</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>This new configuration forces the connection to re-establish with the alternate key, which is shown using the <code>show tcp authentication summary</code> command on Spine1.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/show_tcp_auth_summary_force.png" alt="show tcp auth summary force">
+</div>
+</div>
+<div class="paragraph">
+<p>The <code>authentication-secret-mismatch</code> counter should be zero. This can be shown by dumping the contents of the <code>global.tcp.auth.statistics</code>, as shown below.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/show_datastore_table_dump.png" alt="show datastore table dump">
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_force_key_mismatch">5.2. Force Key Mismatch</h3>
+<div class="paragraph">
+<p>If the configuration send key changes to a key that the receiver does not recognize at all, the connection will flap and not re-establish itself.</p>
+</div>
+<div class="paragraph">
+<p>To demonstrate this, change the secret key on a system such as Spine1 to send a key not configured on another system. Spine1 should log <code>authentication-secret-mismatches</code>, so the counter should be greater than 0.</p>
+</div>
+<div class="paragraph">
+<p>To revert to the established session state, change the send key configuration back to one of the two valid send keys. The authentication-secret-mismatches counter should stabilize and stop incrementing.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_change_authentication_type">5.3. Change Authentication Type</h3>
+<div class="paragraph">
+<p>If the configuration Authentication Type changes from MD5 to SHA-1 or SHA-2, the sessions do not log <code>authentication-secret-mismatches</code>, but log <code>authentication-algo-mismatches</code>.</p>
+</div>
+<div class="paragraph">
+<p>In other words:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>The <code>authentication-secret-mismatches</code> counter remains stable or 0</p>
+</li>
+<li>
+<p>The <code>authentication-algo-mismatches</code> counter increments</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Changing the configuration back to matching authentication algorithms re-establishes the session and stabilizes the counters.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_deleting_tcp_ao">6. Deleting TCP-AO</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>This section of the document shows what happens when TCP-AO is deleted.</p>
+</div>
+<div class="paragraph">
+<p>If TCP-AO is removed, the session should flap and not be re-established until both end systems of the connection match configurations again.</p>
+</div>
+<div class="paragraph">
+<p>Check the session uptime to make sure the session has failed.</p>
+</div>
+<div class="paragraph">
+<p>The assumption for lossless behavior is that the TCP stack silently discards (ignores) the following:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Unauthenticated segments</p>
+</li>
+<li>
+<p>Authenticated segments when no authentication is configured</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Both sides will retransmit until both ends of the session are configured with matching authentication configurations.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_troubleshooting_tcp_ao">7. Troubleshooting TCP-AO</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>This section of the document shows how to address TCP-AO issues. There are a couple of things to check if TCP-AO results are not what is expected.</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Most TCP-AO configuration-related issues can be caught through logging. To enable the logging, use the following command:</p>
+<div class="literalblock">
+<div class="content">
+<pre>set tcp log-level 5</pre>
+</div>
+</div>
+</li>
+<li>
+<p>Log levels can be from 1 to 5, which have increasing order of verbosity. You can display the log messages stored in <code>/var/log/upstart/&lt;app_name&gt;.log</code></p>
+</li>
+<li>
+<p>Make sure that TCP-AO configurations are applied on the sessions of interest. Check that by displaying the TCP sessions and making sure that all options are set. Display the TCP status detail with the <code>show tcp status detail</code> command.</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Make sure to apply the configurations for both server and client end for protocol sessions such as BGP.</p>
+</div>
+<div class="paragraph">
+<p>Let us know if you find any other useful tips!</p>
+</div>
+<hr>
+<div class="paragraph">
+<p>&#169;Copyright 2019 RtBrick, Inc. All rights reserved. The information contained herein is subject
+to change without notice. The trademarks, logos and service marks ("Marks") displayed in this
+documentation are the property of RtBrick in the United States and other countries. Use of the Marks
+are subject to RtBrick’s Term of Use Policy, available at <a href="https://www.rtbrick.com/privacy" class="bare">https://www.rtbrick.com/privacy</a>. Use of marks
+belonging to other parties is for informational purposes only.</p>
+</div>
+</div>
+</div>
+</div>
+<div id="footer">
+<div id="footer-text">
+Version 2019.1.0<br>
+Last updated 2020-01-09 09:10:42 +0530
+</div>
+</div>
+</body>
+</html>
